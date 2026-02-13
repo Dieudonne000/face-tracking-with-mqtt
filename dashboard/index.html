@@ -1,0 +1,405 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Vision Control — Face-Locked Servo</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg-start: #f8fafc;
+            --bg-end: #e2e8f0;
+            --glass: rgba(255, 255, 255, 0.72);
+            --glass-border: rgba(255, 255, 255, 0.9);
+            --shadow: 0 4px 24px rgba(0, 0, 0, 0.06);
+            --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.08);
+            --text: #0f172a;
+            --text-secondary: #475569;
+            --text-tertiary: #94a3b8;
+            --accent: #6366f1;
+            --accent-soft: rgba(99, 102, 241, 0.12);
+            --live: #10b981;
+            --live-soft: rgba(16, 185, 129, 0.12);
+            --left: #f59e0b;
+            --right: #3b82f6;
+            --centered: #10b981;
+            --no-face: #94a3b8;
+            --err: #ef4444;
+            --radius: 16px;
+            --radius-sm: 10px;
+        }
+
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: linear-gradient(160deg, var(--bg-start) 0%, var(--bg-end) 100%);
+            color: var(--text);
+            min-height: 100vh;
+            padding: 24px;
+            -webkit-font-smoothing: antialiased;
+        }
+
+        .app {
+            max-width: 680px;
+            margin: 0 auto;
+        }
+
+        /* Header */
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 24px;
+        }
+
+        .header h1 {
+            font-size: 1.25rem;
+            font-weight: 700;
+            letter-spacing: -0.03em;
+            color: var(--text);
+        }
+
+        .live-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 16px;
+            border-radius: 999px;
+            font-size: 0.8125rem;
+            font-weight: 600;
+            background: var(--glass);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            box-shadow: var(--shadow);
+        }
+
+        .live-pill .led {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--text-tertiary);
+        }
+
+        .live-pill.connected .led {
+            background: var(--live);
+            box-shadow: 0 0 0 3px var(--live-soft);
+            animation: breathe 2s ease-in-out infinite;
+        }
+
+        .live-pill.disconnected .led { background: var(--err); }
+        .live-pill.connecting .led { background: #f59e0b; animation: blink 1s ease-in-out infinite; }
+
+        @keyframes breathe {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(1.1); }
+        }
+        @keyframes blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+
+        /* Bento grid */
+        .bento {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            grid-template-rows: auto auto auto;
+            gap: 16px;
+        }
+
+        .tile {
+            background: var(--glass);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid var(--glass-border);
+            border-radius: var(--radius);
+            padding: 20px;
+            box-shadow: var(--shadow);
+            transition: box-shadow 0.2s ease, transform 0.2s ease;
+        }
+
+        .tile:active { transform: scale(0.99); }
+
+        .tile.span-2 { grid-column: span 2; }
+        .tile.hero {
+            grid-column: span 2;
+            padding: 28px;
+            text-align: center;
+        }
+
+        .tile-label {
+            font-size: 0.6875rem;
+            font-weight: 600;
+            text-transform: uppercase;
+            letter-spacing: 0.12em;
+            color: var(--text-tertiary);
+            margin-bottom: 8px;
+        }
+
+        .tile-value {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 1.5rem;
+            font-weight: 600;
+            letter-spacing: -0.02em;
+        }
+
+        .tile-value.status-MOVE_LEFT { color: var(--left); }
+        .tile-value.status-MOVE_RIGHT { color: var(--right); }
+        .tile-value.status-CENTERED { color: var(--centered); }
+        .tile-value.status-NO_FACE,
+        .tile-value.status-UNKNOWN { color: var(--no-face); }
+
+        /* Hero status */
+        .hero .tile-value {
+            font-size: 1.75rem;
+            margin-bottom: 4px;
+        }
+
+        .hero .tile-label { margin-bottom: 4px; }
+
+        .confidence-ring {
+            width: 64px;
+            height: 64px;
+            margin: 12px auto 0;
+            border-radius: 50%;
+            background: conic-gradient(var(--accent) calc(var(--pct, 0) * 1%), var(--accent-soft) 0);
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .confidence-ring::after {
+            content: '';
+            width: 52px;
+            height: 52px;
+            border-radius: 50%;
+            background: var(--glass);
+            border: 1px solid var(--glass-border);
+        }
+
+        /* Direction track */
+        .track-wrap {
+            margin-top: 20px;
+        }
+
+        .track {
+            height: 8px;
+            border-radius: 999px;
+            background: var(--bg-end);
+            position: relative;
+            overflow: visible;
+        }
+
+        .track-knob {
+            width: 24px;
+            height: 24px;
+            border-radius: 50%;
+            background: var(--text-tertiary);
+            border: 3px solid white;
+            box-shadow: var(--shadow);
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            transition: left 0.25s cubic-bezier(0.34, 1.56, 0.64, 1);
+        }
+
+        .track-knob.left { left: 15%; background: var(--left); }
+        .track-knob.right { left: 85%; background: var(--right); }
+        .track-knob.centered { left: 50%; background: var(--centered); }
+        .track-knob.idle { left: 50%; background: var(--no-face); }
+
+        /* Timeline log */
+        .timeline {
+            list-style: none;
+            height: 160px;
+            overflow-y: auto;
+            padding-left: 20px;
+            border-left: 2px solid var(--bg-end);
+            margin-left: 6px;
+        }
+
+        .timeline::-webkit-scrollbar { width: 6px; }
+        .timeline::-webkit-scrollbar-track { background: transparent; }
+        .timeline::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 3px; }
+
+        .timeline li {
+            position: relative;
+            padding-bottom: 14px;
+            font-size: 0.8125rem;
+            color: var(--text-secondary);
+            animation: slideIn 0.3s ease;
+        }
+
+        .timeline li::before {
+            content: '';
+            position: absolute;
+            left: -26px;
+            top: 6px;
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: var(--accent);
+        }
+
+        .timeline li .time {
+            font-family: 'IBM Plex Mono', monospace;
+            font-size: 0.6875rem;
+            color: var(--text-tertiary);
+            margin-right: 10px;
+        }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-8px); }
+            to { opacity: 1; transform: translateX(0); }
+        }
+
+        .footer {
+            margin-top: 24px;
+            text-align: center;
+            font-size: 0.75rem;
+            color: var(--text-tertiary);
+            font-family: 'IBM Plex Mono', monospace;
+        }
+    </style>
+</head>
+<body>
+    <div class="app">
+        <header class="header">
+            <h1>Vision Control</h1>
+            <div id="livePill" class="live-pill connecting">
+                <span class="led"></span>
+                <span id="liveText">Connecting…</span>
+            </div>
+        </header>
+
+        <div class="bento">
+            <div class="tile hero">
+                <div class="tile-label">Tracking state</div>
+                <div id="statusValue" class="tile-value status-NO_FACE">—</div>
+                <div class="confidence-ring" id="confRing" style="--pct: 0"></div>
+                <div class="track-wrap">
+                    <div class="track">
+                        <div id="trackKnob" class="track-knob idle" aria-hidden="true"></div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="tile">
+                <div class="tile-label">Confidence</div>
+                <div id="confValue" class="tile-value">—</div>
+            </div>
+            <div class="tile">
+                <div class="tile-label">Messages</div>
+                <div id="msgCount" class="tile-value">0</div>
+            </div>
+            <div class="tile span-2">
+                <div class="tile-label">Last update</div>
+                <div id="tsValue" class="tile-value" style="font-size:1rem;">—</div>
+            </div>
+            <div class="tile span-2">
+                <div class="tile-label">Event stream</div>
+                <ul id="timeline" class="timeline" role="log"></ul>
+            </div>
+        </div>
+
+        <footer class="footer" id="footerWs">Phase 1 · Face-locked servo</footer>
+    </div>
+
+    <script>
+        const WS_URL = (location.host && (location.protocol === 'http:' || location.protocol === 'https:'))
+            ? ('ws' + (location.protocol === 'https:' ? 's' : '') + '://' + location.hostname + ':9002')
+            : 'ws://127.0.0.1:9002';
+        const MAX_LOG = 60;
+
+        const $livePill = document.getElementById("livePill");
+        const $liveText = document.getElementById("liveText");
+        const $status = document.getElementById("statusValue");
+        const $conf = document.getElementById("confValue");
+        const $confRing = document.getElementById("confRing");
+        const $ts = document.getElementById("tsValue");
+        const $count = document.getElementById("msgCount");
+        const $trackKnob = document.getElementById("trackKnob");
+        const $timeline = document.getElementById("timeline");
+
+        let messageCount = 0;
+        let ws = null;
+
+        function connect() {
+            $livePill.className = "live-pill connecting";
+            $liveText.textContent = "Connecting…";
+            ws = new WebSocket(WS_URL);
+
+            ws.onopen = () => {
+                $livePill.className = "live-pill connected";
+                $liveText.textContent = "Live";
+                addLog("Connected");
+            };
+
+            ws.onmessage = (evt) => {
+                try {
+                    const data = JSON.parse(evt.data);
+                    handleMessage(data);
+                } catch (e) {
+                    addLog("Invalid message");
+                }
+            };
+
+            ws.onclose = () => {
+                $livePill.className = "live-pill disconnected";
+                $liveText.textContent = "Offline";
+                addLog("Connection lost — reconnecting in 3s");
+                setTimeout(connect, 3000);
+            };
+
+            ws.onerror = () => addLog("WebSocket error");
+        }
+
+        function handleMessage(data) {
+            messageCount++;
+            const status = data.status || "UNKNOWN";
+            const confidence = data.confidence ?? 0;
+            const timestamp = data.timestamp || 0;
+
+            $status.textContent = status;
+            $status.className = "tile-value status-" + status;
+
+            const pct = Math.round(confidence * 100);
+            $conf.textContent = pct + "%";
+            $confRing.style.setProperty("--pct", pct);
+
+            if (timestamp > 0) {
+                const d = new Date(timestamp * 1000);
+                $ts.textContent = d.toLocaleTimeString();
+            }
+
+            $count.textContent = String(messageCount);
+
+            $trackKnob.className = "track-knob ";
+            if (status === "MOVE_LEFT") $trackKnob.classList.add("left");
+            else if (status === "MOVE_RIGHT") $trackKnob.classList.add("right");
+            else if (status === "CENTERED") $trackKnob.classList.add("centered");
+            else $trackKnob.classList.add("idle");
+
+            addLog(status + " · " + (confidence * 100).toFixed(1) + "%");
+        }
+
+        function addLog(text) {
+            const li = document.createElement("li");
+            const now = new Date().toLocaleTimeString();
+            li.innerHTML = '<span class="time">' + escapeHtml(now) + '</span>' + escapeHtml(text);
+            $timeline.prepend(li);
+            while ($timeline.children.length > MAX_LOG) $timeline.removeChild($timeline.lastChild);
+        }
+
+        function escapeHtml(s) {
+            const div = document.createElement("div");
+            div.textContent = s;
+            return div.innerHTML;
+        }
+
+        document.getElementById("footerWs").textContent += " · " + WS_URL;
+        connect();
+    </script>
+</body>
+</html>
