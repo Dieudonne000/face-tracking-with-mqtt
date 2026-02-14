@@ -17,6 +17,7 @@ Architecture rule:
     ❌ No WebSocket, HTTP, or browser communication
 """
 
+import utils.session
 import time
 import json
 from machine import Pin, PWM
