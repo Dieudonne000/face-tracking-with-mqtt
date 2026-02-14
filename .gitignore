@@ -1,2 +1,6 @@
 .venv
 models/embedder_arcface.onnx
+.gitignore
+node_modules
+
+.env*
